@@ -54,8 +54,8 @@ The annotated GenBank file can be opened in SnapGene or UGENE to visualize all a
 |---------|--------|-------|
 | 5' Splice Site (5'SS) | MaxEntScan | Royal Blue |
 | 3' Splice Site (3'SS) | MaxEntScan | Crimson |
-| Branch Point (BPS) | BPP | Orange |
-| Polypyrimidine Tract (PPT) | Pyrimidine density | Gold |
+| Branch Point (BPS) | BPP + SVM-BPfinder | Orange |
+| Polypyrimidine Tract (PPT) | Length, pyrimidine %, longest U-run | Gold |
 | SRSF1 binding (ESE) | ESEfinder | Violet |
 | SRSF2 binding (ESE) | ESEfinder | Pink |
 | SRSF5 binding (ESE) | ESEfinder | Amber |
@@ -69,9 +69,25 @@ Splicemap reads exon annotations from the input GenBank file (it does not annota
 
 ## Methods and references
 
-**Splice sites** scored with [MaxEntScan](https://pubmed.ncbi.nlm.nih.gov/15285897/) (Yeo & Burge 2004). Above 6 is strong, 3-6 moderate, below 3 weak. Non-canonical dinucleotides (not GT...AG) are flagged.
+### Splice sites
 
-**Branch points** predicted with [BPP](https://github.com/zhqingit/BPP) (position weight matrix on verified human branch points). z-score above 2 is strong.
+Scored with [MaxEntScan](https://pubmed.ncbi.nlm.nih.gov/15285897/) (Yeo & Burge 2004), the standard for splice site strength estimation. Used in clinical variant interpretation (ACMG guidelines, ClinVar workflows). The 5' donor site uses a 9-mer window (3 exonic + 6 intronic bases), the 3' acceptor uses a 23-mer (20 intronic + 3 exonic). Scores are log-odds: above 6 is strong, 3-6 moderate, below 3 weak. Non-canonical dinucleotides (not GT...AG) are flagged.
+
+### Branch points
+
+Predicted with [BPP](https://github.com/zhqingit/BPP) (PWM trained on verified human branch points) and [SVM-BPfinder](https://github.com/comprna/SVM-BPfinder-3M) (SVM classifier with sequence and secondary structure features). Both tools are run independently on each intron. The top 2 candidates from each are reported with z-scores, motif sequences, and distance to the 3'SS. When both tools agree on a candidate, that prediction is the most defensible. When they diverge, both are shown.
+
+Branch point prediction is roughly 75-80% accurate in the best benchmarks. No published tool reliably identifies the correct branch point across all intron contexts. Treat predictions as strong candidates, not ground truth.
+
+### Polypyrimidine tract
+
+The PPT is the pyrimidine-rich region between the branch point and the 3' AG dinucleotide. U2AF65 binds here through its two RRM domains, each grabbing roughly 4-5 uridines (crystal structure data). Splicemap defines the PPT window as the sequence between the top BPS prediction and the 3'SS AG, then reports three numbers: total length, pyrimidine percentage, and the longest uninterrupted U-run.
+
+The U-run is the most informative single feature. A PPT that is 70% pyrimidine but has no U-run longer than 3 is weaker than one with a 7-U stretch at lower overall composition. PPT and BPS compensate for each other: a strong PPT can rescue a weak branch point, and vice versa.
+
+No validated computational model for U2AF65 binding affinity exists in the field. PPT is scored by composition, which is what everyone does because nothing better has been published and adopted. The PPT window also depends on the BPS prediction. If the branch point is called at the wrong position, the PPT window shifts accordingly.
+
+### Exonic splicing enhancers and silencers
 
 **ESEfinder** predicts binding sites for 4 SR proteins (SRSF1, SRSF2, SRSF5, SRSF6) using in vitro SELEX-derived matrices ([Cartegni et al. 2003](https://pubmed.ncbi.nlm.nih.gov/12824367/)). Tells you which protein likely binds where. Does not cover other SR proteins (SRSF3, SRSF7, Tra2-beta, RBFOX). ~44% accuracy on known splicing mutations.
 
@@ -85,6 +101,7 @@ Splicemap reads exon annotations from the input GenBank file (it does not annota
 - No positional weighting. ESEs near splice sites matter more than those in the exon center.
 - No combinatorial effects between adjacent elements.
 - No cell-type specificity. Splicing regulation varies between tissues.
+- Branch point prediction accuracy is inherently limited (~75-80%). PPT analysis depends on BPS prediction.
 - Silencer protein coverage is limited to hnRNP A1 and H by motif. ESRseq provides broader but protein-anonymous coverage.
 
 ## Commands
