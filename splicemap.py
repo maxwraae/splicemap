@@ -154,8 +154,6 @@ SPLICEMAP_COLORS = {
     'PPT':     '#FFD700',  # gold (polypyrimidine tract / U2AF65)
     'hnRNP_A1': '#EF4444', # red (silencer)
     'hnRNP_H':  '#B91C1C', # dark red (G-run silencer)
-    'exon':    '#4682B4',  # steel blue
-    'intron':  '#A9A9A9',  # dark grey
 }
 
 # ── hnRNP binding motifs (ESSs) ────────────────────────────────────────────
@@ -173,6 +171,66 @@ HNRNP_MOTIFS = {
         'color': '#B91C1C',
         'description': 'hnRNP H binding site (G-run ESS)',
     },
+}
+
+# ── ESRseq hexamer lookup (Ke et al., Genome Research 2011) ───────────────────
+# Measured splicing activity of all hexamers in a minigene assay.
+# Positive score = promotes exon inclusion (ESE). Negative = promotes skipping (ESS).
+# 83% accuracy on known splicing mutations vs ESEfinder's 44%.
+_ESRSEQ_ESE = None  # dict: hexamer -> score (positive)
+_ESRSEQ_ESS = None  # dict: hexamer -> score (negative)
+
+def _load_esrseq():
+    """Load ESRseq hexamer tables (lazy, once)."""
+    global _ESRSEQ_ESE, _ESRSEQ_ESS
+    if _ESRSEQ_ESE is not None:
+        return
+    tools_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "esrseq")
+    _ESRSEQ_ESE = {}
+    _ESRSEQ_ESS = {}
+    for fname, target in [("ESE.txt", _ESRSEQ_ESE), ("ESS.txt", _ESRSEQ_ESS)]:
+        path = os.path.join(tools_dir, fname)
+        if os.path.exists(path):
+            with open(path) as f:
+                for line in f:
+                    parts = line.strip().split('\t')
+                    if len(parts) == 2:
+                        target[parts[0].upper()] = float(parts[1])
+
+
+def _find_esrseq_sites(exon_seq):
+    """Scan exon sequence for ESRseq hexamers (ESE and ESS).
+
+    Returns:
+        list of dicts with 'type' ('ESE'/'ESS'), 'start_0', 'end_0', 'score', 'motif'
+    """
+    _load_esrseq()
+    seq = str(exon_seq).upper()
+    hits = []
+    for i in range(len(seq) - 5):
+        hexamer = seq[i:i + 6]
+        if hexamer in _ESRSEQ_ESE:
+            hits.append({
+                'type': 'ESE',
+                'start_0': i,
+                'end_0': i + 6,
+                'score': _ESRSEQ_ESE[hexamer],
+                'motif': hexamer,
+            })
+        elif hexamer in _ESRSEQ_ESS:
+            hits.append({
+                'type': 'ESS',
+                'start_0': i,
+                'end_0': i + 6,
+                'score': _ESRSEQ_ESS[hexamer],
+                'motif': hexamer,
+            })
+    return hits
+
+
+ESRSEQ_COLORS = {
+    'ESE': '#22C55E',   # green (enhancer)
+    'ESS': '#F97316',   # orange (silencer)
 }
 
 # Lazy-loaded maxentpy for splice site scoring
@@ -3325,8 +3383,8 @@ def _discover_introns(record, transcript_accession=None, email="user@example.com
     """Discover intron boundaries from a GenBank record.
 
     Tries multiple strategies in order:
-    1. If transcript_accession given, fetch mRNA and align to find exons, derive introns from gaps
-    2. If exon-type features exist, use gaps between them
+    1. If exon-type features exist in the file, use gaps between them (best: NCBI-annotated)
+    2. If transcript_accession given, fetch RefSeqGene from NCBI to get exon coordinates
     3. If intron-type features exist, use those directly
     4. Scan misc_feature/regulatory labels for 'intron' keyword, use those
     5. Error with helpful message
@@ -3343,75 +3401,17 @@ def _discover_introns(record, transcript_accession=None, email="user@example.com
     introns = []
 
     # ------------------------------------------------------------------
-    # Strategy 1: Align mRNA transcript to find exons, derive introns
-    # ------------------------------------------------------------------
-    if transcript_accession:
-        from Bio import Entrez
-        from Bio import SeqIO as _SeqIO
-        Entrez.email = email
-        try:
-            handle = Entrez.efetch(db="nucleotide", id=transcript_accession,
-                                   rettype="fasta", retmode="text")
-            mrna_record = _SeqIO.read(handle, "fasta")
-            handle.close()
-        except Exception as e:
-            print(f"Warning: could not fetch {transcript_accession}: {e}", file=sys.stderr)
-            mrna_record = None
-
-        if mrna_record is not None:
-            mrna = str(mrna_record.seq)
-            genomic = str(record.seq)
-            exons = []
-            mrna_pos = 0
-            min_match = 20
-
-            while mrna_pos < len(mrna):
-                query = mrna[mrna_pos:mrna_pos + 30]
-                if len(query) < 20:
-                    break
-                gpos = genomic.upper().find(query.upper())
-                if gpos == -1:
-                    mrna_pos += 1
-                    continue
-                match_len = 0
-                while (mrna_pos + match_len < len(mrna) and
-                       gpos + match_len < len(genomic) and
-                       mrna[mrna_pos + match_len].upper() == genomic[gpos + match_len].upper()):
-                    match_len += 1
-                if match_len >= min_match:
-                    exons.append({
-                        "genomic_start_0": gpos,
-                        "genomic_end_0": gpos + match_len,
-                    })
-                    mrna_pos += match_len
-                else:
-                    mrna_pos += 1
-
-            if len(exons) >= 2:
-                exons_sorted = sorted(exons, key=lambda e: e["genomic_start_0"])
-                for i in range(len(exons_sorted) - 1):
-                    up = exons_sorted[i]
-                    dn = exons_sorted[i + 1]
-                    intron_start = up["genomic_end_0"]
-                    intron_end = dn["genomic_start_0"]
-                    if intron_end > intron_start:
-                        introns.append({
-                            "start_0": intron_start,
-                            "end_0": intron_end,
-                            "upstream_exon": (up["genomic_start_0"], up["genomic_end_0"]),
-                            "downstream_exon": (dn["genomic_start_0"], dn["genomic_end_0"]),
-                            "label": f"intron {i + 1}",
-                        })
-                if introns:
-                    return sorted(introns, key=lambda x: x["start_0"])
-
-    # ------------------------------------------------------------------
-    # Strategy 2: Exon-type features — derive introns from gaps
+    # Strategy 1: File already has exon features — use them directly.
+    # This is the preferred path: download RefSeqGene from NCBI which
+    # comes with exon annotations, then splicemap reads them.
     # ------------------------------------------------------------------
     exon_features = sorted(
         [f for f in record.features if f.type == "exon"],
         key=lambda f: int(f.location.start)
     )
+    # Filter out any SM: prefixed exons (those are our own annotations)
+    exon_features = [f for f in exon_features
+                     if not any(l.startswith("SM:") for l in f.qualifiers.get("label", []))]
     if len(exon_features) >= 2:
         for i in range(len(exon_features) - 1):
             up = exon_features[i]
@@ -3428,6 +3428,97 @@ def _discover_introns(record, transcript_accession=None, email="user@example.com
                 })
         if introns:
             return sorted(introns, key=lambda x: x["start_0"])
+
+    # ------------------------------------------------------------------
+    # Strategy 2: Fetch RefSeqGene from NCBI to get exon coordinates.
+    # The transcript accession (e.g. NM_004992.4) is used to look up
+    # the gene, then the RefSeqGene record which has exon annotations.
+    # Exon sequences are mapped onto the user's genomic sequence.
+    # ------------------------------------------------------------------
+    if transcript_accession:
+        from Bio import Entrez
+        from Bio import SeqIO as _SeqIO
+        Entrez.email = email
+
+        try:
+            # Fetch the mRNA as GenBank to get exon sequences
+            handle = Entrez.efetch(db="nucleotide", id=transcript_accession,
+                                   rettype="gb", retmode="text")
+            mrna_record = _SeqIO.read(handle, "genbank")
+            handle.close()
+
+            mrna_seq = str(mrna_record.seq).upper()
+            genomic = str(record.seq).upper()
+
+            # Extract exon sequences from mRNA record
+            mrna_exons = sorted(
+                [f for f in mrna_record.features if f.type == "exon"],
+                key=lambda f: int(f.location.start)
+            )
+
+            exon_seqs = []
+            if mrna_exons:
+                for ef in mrna_exons:
+                    s, e = int(ef.location.start), int(ef.location.end)
+                    exon_seqs.append(mrna_seq[s:e])
+            else:
+                # No exon features on mRNA: use the whole mRNA as one "exon"
+                # and fall through to other strategies
+                pass
+
+            # Map each exon sequence onto the user's genomic sequence
+            if len(exon_seqs) >= 2:
+                mapped_exons = []
+                search_start = 0
+                for exon_seq in exon_seqs:
+                    anchor = exon_seq[:min(30, len(exon_seq))]
+                    gpos = genomic.find(anchor, search_start)
+                    if gpos == -1:
+                        gpos = genomic.find(anchor)
+                    if gpos == -1:
+                        continue
+                    # Extend match
+                    match_len = 0
+                    while (match_len < len(exon_seq) and
+                           gpos + match_len < len(genomic) and
+                           exon_seq[match_len] == genomic[gpos + match_len]):
+                        match_len += 1
+                    mapped_exons.append({
+                        "genomic_start_0": gpos,
+                        "genomic_end_0": gpos + match_len,
+                    })
+                    search_start = gpos + match_len
+
+                if len(mapped_exons) >= 2:
+                    mapped_exons.sort(key=lambda e: e["genomic_start_0"])
+                    for i in range(len(mapped_exons) - 1):
+                        up = mapped_exons[i]
+                        dn = mapped_exons[i + 1]
+                        intron_start = up["genomic_end_0"]
+                        intron_end = dn["genomic_start_0"]
+                        if intron_end > intron_start:
+                            # Snap to nearest GT-AG
+                            best_5, best_5_dist = intron_start, 999
+                            for off in range(-5, 6):
+                                p = intron_start + off
+                                if 0 <= p < len(genomic) - 1 and genomic[p:p+2] == 'GT' and abs(off) < best_5_dist:
+                                    best_5, best_5_dist = p, abs(off)
+                            best_3, best_3_dist = intron_end, 999
+                            for off in range(-5, 6):
+                                p = intron_end + off
+                                if 1 <= p <= len(genomic) and genomic[p-2:p] == 'AG' and abs(off) < best_3_dist:
+                                    best_3, best_3_dist = p, abs(off)
+                            introns.append({
+                                "start_0": best_5,
+                                "end_0": best_3,
+                                "upstream_exon": (up["genomic_start_0"], best_5),
+                                "downstream_exon": (best_3, dn["genomic_end_0"]),
+                                "label": f"intron {i + 1}",
+                            })
+                    if introns:
+                        return sorted(introns, key=lambda x: x["start_0"])
+        except Exception as e:
+            print(f"Warning: could not fetch {transcript_accession}: {e}", file=sys.stderr)
 
     # ------------------------------------------------------------------
     # Strategy 3: Intron-type features — use directly
@@ -3746,52 +3837,6 @@ def _splicemap_annotate(record, introns, skip_ese=False):
 
     new_features = []
 
-    # Step 1b: annotate exons and introns as structural features
-    # Collect all unique exons from intron data
-    all_exons = {}  # (start_0, end_0) -> label
-    for idx, intron in enumerate(introns):
-        up = intron.get('upstream_exon')
-        dn = intron.get('downstream_exon')
-        if up:
-            key = (up[0], up[1]) if isinstance(up, tuple) else (up.get('start_0'), up.get('end_0'))
-            if key not in all_exons and None not in key:
-                all_exons[key] = None  # label assigned below
-        if dn:
-            key = (dn[0], dn[1]) if isinstance(dn, tuple) else (dn.get('start_0'), dn.get('end_0'))
-            if key not in all_exons and None not in key:
-                all_exons[key] = None
-
-    # Assign exon labels by genomic order
-    for i, key in enumerate(sorted(all_exons.keys()), 1):
-        all_exons[key] = f"Exon {i}"
-
-    # Write exon features
-    for (ex_s, ex_e), ex_label in sorted(all_exons.items()):
-        feat_exon = SeqFeature(
-            FeatureLocation(ex_s, ex_e, strand=1),
-            type="exon",
-            qualifiers={
-                "label": [f"SM:{ex_label}"],
-                "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['exon']],
-                "ApEinfo_revcolor": [SPLICEMAP_COLORS['exon']],
-            }
-        )
-        new_features.append(feat_exon)
-
-    # Write intron features
-    for intron in introns:
-        intron_label = intron['label']
-        feat_intron = SeqFeature(
-            FeatureLocation(intron['start_0'], intron['end_0'], strand=1),
-            type="intron",
-            qualifiers={
-                "label": [f"SM:{intron_label}"],
-                "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['intron']],
-                "ApEinfo_revcolor": [SPLICEMAP_COLORS['intron']],
-            }
-        )
-        new_features.append(feat_intron)
-
     # Track unique exons: key = (start_0, end_0) -> exon label
     exon_registry = {}
 
@@ -4004,6 +4049,8 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                 'length': exon_len,
                 'ese_summary': {},
                 'ess_summary': {},
+                'esrseq_ese_count': 0,
+                'esrseq_ess_count': 0,
             }
 
             # ESE sites
@@ -4069,6 +4116,51 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                         }
                     )
                     new_features.append(feat_ess)
+
+            # ESRseq sites (Ke et al. 2011)
+            esrseq_hits = _find_esrseq_sites(exon_seq)
+            esrseq_ese = [h for h in esrseq_hits if h['type'] == 'ESE']
+            esrseq_ess = [h for h in esrseq_hits if h['type'] == 'ESS']
+            exon_report['esrseq_ese_count'] = len(esrseq_ese)
+            exon_report['esrseq_ess_count'] = len(esrseq_ess)
+
+            # Annotate top ESRseq ESE regions (merge overlapping, take top 5)
+            if esrseq_ese:
+                ese_for_merge = [{'protein': 'ESRseq_ESE', 'start_0': h['start_0'],
+                                  'end_0': h['end_0'], 'score': h['score']} for h in esrseq_ese]
+                merged_ese = _merge_splicing_regions(ese_for_merge, gap=3)
+                for region in merged_ese[:5]:
+                    genomic_start = ex_start_0 + region['start_0']
+                    genomic_end = ex_start_0 + region['end_0']
+                    new_features.append(SeqFeature(
+                        FeatureLocation(genomic_start, genomic_end, strand=1),
+                        type="misc_feature",
+                        qualifiers={
+                            "label": [f"SM:ESRseq_ESE_{exon_key}"],
+                            "ApEinfo_fwdcolor": [ESRSEQ_COLORS['ESE']],
+                            "ApEinfo_revcolor": [ESRSEQ_COLORS['ESE']],
+                            "note": [f"ESRseq ESE. score: {region['top_score']:.3f}, {region['hit_count']} hexamer(s). Ke et al. 2011"],
+                        }
+                    ))
+
+            # Annotate top ESRseq ESS regions
+            if esrseq_ess:
+                ess_for_merge = [{'protein': 'ESRseq_ESS', 'start_0': h['start_0'],
+                                  'end_0': h['end_0'], 'score': h['score']} for h in esrseq_ess]
+                merged_ess = _merge_splicing_regions(ess_for_merge, gap=3)
+                for region in merged_ess[:5]:
+                    genomic_start = ex_start_0 + region['start_0']
+                    genomic_end = ex_start_0 + region['end_0']
+                    new_features.append(SeqFeature(
+                        FeatureLocation(genomic_start, genomic_end, strand=1),
+                        type="misc_feature",
+                        qualifiers={
+                            "label": [f"SM:ESRseq_ESS_{exon_key}"],
+                            "ApEinfo_fwdcolor": [ESRSEQ_COLORS['ESS']],
+                            "ApEinfo_revcolor": [ESRSEQ_COLORS['ESS']],
+                            "note": [f"ESRseq ESS. score: {region['top_score']:.3f}, {region['hit_count']} hexamer(s). Ke et al. 2011"],
+                        }
+                    ))
 
             report_data['exons'].append(exon_report)
 
@@ -4616,12 +4708,14 @@ def _print_splicemap_summary(report):
 
     # ESE/ESS summary per exon
     if report.get('exons'):
-        print(f"\n{'Exon':<20} {'Length':>6}  ESE sites  ESS sites")
-        print(f"{'-'*20} {'-'*6}  {'-'*9}  {'-'*9}")
+        print(f"\n{'Exon':<20} {'Length':>6}  {'ESEfinder':>9}  {'hnRNP':>5}  {'ESRseq+':>7}  {'ESRseq-':>7}")
+        print(f"{'-'*20} {'-'*6}  {'-'*9}  {'-'*5}  {'-'*7}  {'-'*7}")
         for e in report['exons']:
             ese_total = sum(info['count'] for info in e.get('ese_summary', {}).values())
             ess_total = sum(info['count'] for info in e.get('ess_summary', {}).values())
-            print(f"{e['label']:<20} {e['length']:>5}  {ese_total:>9}  {ess_total:>9}")
+            esrseq_ese = e.get('esrseq_ese_count', 0)
+            esrseq_ess = e.get('esrseq_ess_count', 0)
+            print(f"{e['label']:<20} {e['length']:>5}  {ese_total:>9}  {ess_total:>5}  {esrseq_ese:>7}  {esrseq_ess:>7}")
 
     # Warnings
     if report.get('warnings'):
