@@ -146,4 +146,4 @@ Branch point tools (BPP, SVM-BPfinder) are downloaded automatically on first use
 
 ## License
 
-GPLv3
+MIT
