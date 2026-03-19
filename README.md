@@ -17,6 +17,12 @@ python splicemap.py splicemap examples/MECP2_CS.gb -t NM_004992.4
 
 ## Example Output
 
+![MECP2 gene with all splicing annotations](images/splicemap-overview.png)
+*Full MECP2 gene (76 kb) showing exons, introns, and ESE/ESS sites annotated by splicemap.*
+
+![Exon 2 detail showing splice signals and ESE sites](images/splicemap-exon2-detail.png)
+*Zoomed into Exon 2: branch point (orange), PPT (gold), 3'SS, and ESE sites (SRSF1/2/5/6) in distinct colors.*
+
 ```
 Found 3 intron(s)
   intron 1: 116-5411 (5,296 bp)
