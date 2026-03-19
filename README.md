@@ -1,6 +1,6 @@
-# splicemap
+# SpliceMap
 
-Annotate splicing regulatory elements on genomic DNA sequences. Given a GenBank file with exon annotations (or an mRNA accession to discover them), splicemap maps splice sites, branch points, polypyrimidine tracts, and exonic splicing enhancers and silencers. Annotations are color-coded and written back to the GenBank file for viewing in SnapGene or UGENE. A markdown report is generated alongside.
+Simple pipeline for annotating splicing regulatory elements on genomic DNA sequences. Given a GenBank file with exon annotations (or an mRNA accession to discover them), splicemap maps splice sites, branch points, polypyrimidine tracts, and exonic splicing enhancers and silencers with the best available tools. Annotations are color-coded and written back to the GenBank file for viewing in SnapGene or UGENE. A markdown report is generated alongside.
 
 ## Quick Start
 
