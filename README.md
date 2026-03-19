@@ -11,6 +11,10 @@ pip install -r requirements.txt
 python splicemap.py splicemap examples/MECP2_CS.gb -t NM_004992.4
 ```
 
+## Input
+
+Download your gene as a **RefSeqGene** from [NCBI Gene](https://www.ncbi.nlm.nih.gov/gene/). These files come with exon annotations already included, which splicemap uses to find introns. If your GenBank file doesn't have exon annotations, pass an mRNA transcript accession with `-t` (e.g. `-t NM_004992.4`) and splicemap will discover them by alignment.
+
 ## What You See
 
 Annotations are named by what they are, not which tool found them. Colors group by function. Shades indicate relative confidence. Double-click any annotation in SnapGene to see the tool, score, motif, and other details.
