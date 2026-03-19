@@ -1,10 +1,6 @@
 # splicemap
 
-Annotate splicing regulatory elements on genomic DNA sequences.
-
-## What It Does
-
-Given a genomic sequence (GenBank format) and an mRNA transcript accession, splicemap discovers exon boundaries by aligning the transcript against the genomic DNA, annotates the resulting introns, and maps all splicing regulatory elements: 5' and 3' splice sites, branch points, polypyrimidine tracts, exonic splicing enhancers (ESE), and exonic splicing silencers (ESS). Output is written back to the GenBank file — viewable in SnapGene or UGENE — with a companion markdown report.
+Annotate splicing regulatory elements on genomic DNA sequences. Given a GenBank file with exon annotations (or an mRNA accession to discover them), splicemap maps splice sites, branch points, polypyrimidine tracts, and exonic splicing enhancers and silencers. Annotations are color-coded and written back to the GenBank file for viewing in SnapGene or UGENE. A markdown report is generated alongside.
 
 ## Quick Start
 
@@ -15,28 +11,31 @@ pip install -r requirements.txt
 python splicemap.py splicemap examples/MECP2_CS.gb -t NM_004992.4
 ```
 
+## What You See
+
+Annotations are named by what they are, not which tool found them. Colors group by function. Shades indicate relative confidence. Double-click any annotation in SnapGene to see the tool, score, motif, and other details.
+
+| Annotation | Color | What it is |
+|------------|-------|------------|
+| Branch Point | Orange (dark to light by rank) | Candidate branch point adenosine |
+| Polypyrimidine Tract | Amber | Pyrimidine-rich region between BPS and 3'SS |
+| 5' Splice Site | Teal | Donor splice site (GT) |
+| 3' Splice Site | Teal (lighter) | Acceptor splice site (AG) |
+| Splice Enhancer (blue) | Blue (shades) | SR protein binding site (ESEfinder) |
+| Splice Enhancer (green) | Green | Hexamer with positive splicing activity (ESRseq) |
+| Splice Silencer (red) | Red (shades) | Hexamer or motif that suppresses exon inclusion |
+
 ## Example Output
 
-![MECP2 gene with all splicing annotations](images/splicemap-overview.png)
-*Full MECP2 gene (76 kb) showing exons, introns, and ESE/ESS sites annotated by splicemap.*
-
-![Exon 2 detail showing splice signals and ESE sites](images/splicemap-exon2-detail.png)
-*Zoomed into Exon 2: branch point (orange), PPT (gold), 3'SS, and ESE sites (SRSF1/2/5/6) in distinct colors.*
-
 ```
-Found 3 intron(s)
-  intron 1: 116-5411 (5,296 bp)
-  intron 2: 5536-65161 (59,626 bp)
-  intron 3: 65512-66267 (756 bp)
-
 Splice Map: MECP2_CS (76,145 bp, linear)
 ============================================================
 
-Intron                 Length     5'SS     3'SS   BPS(z)   PPT%
--------------------- -------- -------- -------- -------- ------
-intron 1               5,296    -15.5      0.1      6.6    75%
-intron 2              59,626    -15.6     -4.7      6.2    63%
-intron 3                 756     10.1     12.4      6.6    80%
+Intron                 Length     5'SS     3'SS   BPS(z)   PPT%  U-run
+-------------------- -------- -------- -------- -------- ------ ------
+intron 1               5,296      7.9     10.8      6.5    80%      4
+intron 2              59,626     10.9      5.3      6.1    67%      3
+intron 3                 756     10.1     12.4      6.6    80%      3
 
 Exon                 Length  ESEfinder  hnRNP  ESRseq+  ESRseq-
 -------------------- ------  ---------  -----  -------  -------
@@ -46,63 +45,41 @@ exon_ds_intron_2       351         57      1      118       69
 exon_ds_intron_3      9878       1436     55     2232     3125
 ```
 
-The annotated GenBank file can be opened in SnapGene or UGENE to visualize all annotations with color-coded features.
-
-## What Gets Annotated
-
-| Element | Method | Color |
-|---------|--------|-------|
-| 5' Splice Site (5'SS) | MaxEntScan | Royal Blue |
-| 3' Splice Site (3'SS) | MaxEntScan | Crimson |
-| Branch Point (BPS) | BPP + SVM-BPfinder | Orange |
-| Polypyrimidine Tract (PPT) | Length, pyrimidine %, longest U-run | Gold |
-| SRSF1 binding (ESE) | ESEfinder | Violet |
-| SRSF2 binding (ESE) | ESEfinder | Pink |
-| SRSF5 binding (ESE) | ESEfinder | Amber |
-| SRSF6 binding (ESE) | ESEfinder | Emerald |
-| ESRseq enhancer (ESE) | ESRseq hexamer lookup | Green |
-| ESRseq silencer (ESS) | ESRseq hexamer lookup | Orange |
-| hnRNP A1 binding (ESS) | Motif matching | Red |
-| hnRNP H binding (ESS) | G-run detection | Dark Red |
-
-Splicemap reads exon annotations from the input GenBank file (it does not annotate exons or introns itself). Download your gene as a RefSeqGene from [NCBI Gene](https://www.ncbi.nlm.nih.gov/gene/) to get a file with exon annotations already included.
-
-## Methods and references
+## Methods
 
 ### Splice sites
 
-Scored with [MaxEntScan](https://pubmed.ncbi.nlm.nih.gov/15285897/) (Yeo & Burge 2004), the standard for splice site strength estimation. Used in clinical variant interpretation (ACMG guidelines, ClinVar workflows). The 5' donor site uses a 9-mer window (3 exonic + 6 intronic bases), the 3' acceptor uses a 23-mer (20 intronic + 3 exonic). Scores are log-odds: above 6 is strong, 3-6 moderate, below 3 weak. Non-canonical dinucleotides (not GT...AG) are flagged.
+[MaxEntScan](https://pubmed.ncbi.nlm.nih.gov/15285897/) (Yeo & Burge 2004). 5'SS scored on a 9-mer (3 exonic + 6 intronic), 3'SS on a 23-mer (20 intronic + 3 exonic). Log-odds scores. Above 6 is strong, 3-6 moderate, below 3 weak. Non-canonical dinucleotides are flagged.
 
 ### Branch points
 
-Predicted with [BPP](https://github.com/zhqingit/BPP) (PWM trained on verified human branch points) and [SVM-BPfinder](https://github.com/comprna/SVM-BPfinder-3M) (SVM classifier with sequence and secondary structure features). Both tools are run independently on each intron. The top 2 candidates from each are reported with z-scores, motif sequences, and distance to the 3'SS. When both tools agree on a candidate, that prediction is the most defensible. When they diverge, both are shown.
+[BPP](https://github.com/zhqingit/BPP) (PWM trained on verified human branch points) and [SVM-BPfinder](https://github.com/comprna/SVM-BPfinder-3M) (SVM classifier). Both run independently on each intron. Up to 4 candidates shown, ranked by score across both tools. Darker orange = higher confidence.
 
-Branch point prediction is roughly 75-80% accurate in the best benchmarks. No published tool reliably identifies the correct branch point across all intron contexts. Treat predictions as strong candidates, not ground truth.
+Branch point prediction is roughly 75-80% accurate. No tool reliably identifies the correct branch point across all intron contexts.
 
 ### Polypyrimidine tract
 
-The PPT is the pyrimidine-rich region between the branch point and the 3' AG dinucleotide. U2AF65 binds here through its two RRM domains, each grabbing roughly 4-5 uridines (crystal structure data). Splicemap defines the PPT window as the sequence between the top BPS prediction and the 3'SS AG, then reports three numbers: total length, pyrimidine percentage, and the longest uninterrupted U-run.
+Defined as the region between the top branch point candidate and the 3'SS AG. Reports length, pyrimidine percentage, and longest uninterrupted U-run. The U-run is the most informative single feature for U2AF65 binding (crystal structures show its two RRM domains each grab 4-5 uridines).
 
-The U-run is the most informative single feature. A PPT that is 70% pyrimidine but has no U-run longer than 3 is weaker than one with a 7-U stretch at lower overall composition. PPT and BPS compensate for each other: a strong PPT can rescue a weak branch point, and vice versa.
-
-No validated computational model for U2AF65 binding affinity exists in the field. PPT is scored by composition, which is what everyone does because nothing better has been published and adopted. The PPT window also depends on the BPS prediction. If the branch point is called at the wrong position, the PPT window shifts accordingly.
+No validated computational model for U2AF65 binding affinity exists. PPT is scored by composition, which is standard practice. The PPT window depends on the branch point prediction.
 
 ### Exonic splicing enhancers and silencers
 
-**ESEfinder** predicts binding sites for 4 SR proteins (SRSF1, SRSF2, SRSF5, SRSF6) using in vitro SELEX-derived matrices ([Cartegni et al. 2003](https://pubmed.ncbi.nlm.nih.gov/12824367/)). Tells you which protein likely binds where. Does not cover other SR proteins (SRSF3, SRSF7, Tra2-beta, RBFOX). ~44% accuracy on known splicing mutations.
+Two methods, measuring different things.
 
-**ESRseq** looks up every hexamer against experimentally measured splicing activity scores ([Ke et al. 2011](https://pubmed.ncbi.nlm.nih.gov/21659425/)). Each hexamer was tested in a minigene assay and scored by RNA-seq. Positive = promotes inclusion, negative = promotes skipping. Captures the net effect of all regulatory proteins, not just four. ~83% accuracy on known splicing mutations. Does not tell you which protein is responsible.
+**ESEfinder** ([Cartegni et al. 2003](https://pubmed.ncbi.nlm.nih.gov/12824367/)). Position weight matrices from SELEX experiments for four SR proteins: SRSF1, SRSF2, SRSF5, SRSF6. Tells you which protein binds where. Only covers 4 of ~12 SR proteins. In vitro binding preference does not always match in vivo function. ~44% accuracy on known splicing mutations.
 
-**hnRNP motifs** detect two silencer proteins by pattern matching: hnRNP A1 (Burd & Dreyfuss 1994) and hnRNP H G-runs (Caputi & Bhatt 2003). For broader silencer coverage, use ESRseq negative scores.
+**ESRseq** ([Ke et al. 2011](https://pubmed.ncbi.nlm.nih.gov/21659425/)). All 4,096 possible hexamers tested in a minigene assay and scored by RNA-seq. Positive score = promotes exon inclusion (enhancer). Negative = promotes skipping (silencer). Captures the combined effect of all proteins that bind a given sequence. Does not identify which protein is responsible. ~83% accuracy on known splicing mutations.
+
+**hnRNP motifs.** Pattern matching for hnRNP A1 ([Burd & Dreyfuss 1994](https://pubmed.ncbi.nlm.nih.gov/7520568/)) and hnRNP H G-runs ([Caputi & Bhatt 2003](https://pubmed.ncbi.nlm.nih.gov/12554860/)).
 
 ### Limitations
 
-- Scans flat sequence only. RNA secondary structure is not considered.
-- No positional weighting. ESEs near splice sites matter more than those in the exon center.
+- Flat sequence only. No RNA secondary structure.
+- No positional weighting (ESEs near splice sites matter more than those mid-exon).
 - No combinatorial effects between adjacent elements.
-- No cell-type specificity. Splicing regulation varies between tissues.
-- Branch point prediction accuracy is inherently limited (~75-80%). PPT analysis depends on BPS prediction.
-- Silencer protein coverage is limited to hnRNP A1 and H by motif. ESRseq provides broader but protein-anonymous coverage.
+- No cell-type or tissue specificity.
+- Branch point prediction accuracy is inherently limited. PPT analysis depends on it.
 
 ## Commands
 
@@ -110,48 +87,47 @@ No validated computational model for U2AF65 binding affinity exists in the field
 
 | Command | Description |
 |---------|-------------|
-| `read <file>` | Parse .gb/.fasta, show clean summary |
-| `features <file>` | List all annotations as a table |
-| `seq <file> <start> <end>` | Extract a sequence region (1-based) |
-| `translate <file> <start> <end>` | Extract a region and translate to protein |
-| `search <file> <sequence>` | Find all occurrences of a DNA motif (both strands) |
-| `orfs <file>` | Find ORFs |
+| `read <file>` | Parse .gb/.fasta, show summary |
+| `features <file>` | List all annotations |
+| `seq <file> <start> <end>` | Extract sequence (1-based) |
+| `translate <file> <start> <end>` | Translate a region |
+| `search <file> <sequence>` | Find motif occurrences (both strands) |
+| `orfs <file>` | Find open reading frames |
 | `sites <file>` | Find restriction sites |
-| `current` | Show files currently open in UGENE |
-| `open <file>` | Open file in default viewer (UGENE/SnapGene) |
+| `open <file>` | Open in default viewer |
 
 ### Annotation
 
 | Command | Description |
 |---------|-------------|
-| `splicemap <file> -t <accession>` | Full splice map: discover exons, annotate all splicing elements |
-| `exons <file> --transcript <accession>` | Find and optionally annotate exon boundaries from mRNA alignment |
-| `annotate <file> <start> <end> <label>` | Add a feature annotation |
-| `annotate-seq <file> <sequence> <label>` | Find a sequence and annotate its position |
-| `splice-signals <file>` | Annotate 5'SS, 3'SS, BPS, PPT on detected or specified introns |
-| `branchpoint <file>` | Predict branch point locations in introns |
-| `remove <file> <label>` | Remove an annotation by label |
+| `splicemap <file> -t <accession>` | Full splice map |
+| `exons <file> -t <accession>` | Find and annotate exon boundaries |
+| `annotate <file> <start> <end> <label>` | Add a feature |
+| `annotate-seq <file> <sequence> <label>` | Find and annotate a sequence |
+| `splice-signals <file>` | Annotate splice signals on detected introns |
+| `branchpoint <file>` | Predict branch points |
+| `remove <file> <label>` | Remove an annotation |
 
 ### Sequence editing
 
 | Command | Description |
 |---------|-------------|
-| `insert <file> <position> <sequence>` | Insert a DNA sequence, shifting downstream features |
-| `delete <file> <start> <end>` | Delete a region, shifting downstream features |
-| `replace <file> <start> <end> <sequence>` | Replace a region with a new sequence |
-| `revcomp <file>` | Reverse complement the sequence |
+| `insert <file> <pos> <seq>` | Insert sequence, shift features |
+| `delete <file> <start> <end>` | Delete region, shift features |
+| `replace <file> <start> <end> <seq>` | Replace region |
+| `revcomp <file>` | Reverse complement |
 
 ### Analysis
 
 | Command | Description |
 |---------|-------------|
 | `diff <file1> <file2>` | Compare two constructs |
-| `blast <file>` | Run a remote NCBI BLAST search |
-| `stitch <file> [labels...]` | Extract annotated regions, stitch together, optionally translate |
-| `check <file>` | Preflight validation of a construct |
-| `gibson <file> --enzymes E1,E2 --insert SEQ` | Design Gibson assembly eBlocks |
-| `varmap <file> <variants_csv>` | Visualize variant positions mapped onto a sequence |
-| `export <file> <format>` | Convert between formats: fasta, genbank, tab (feature TSV) |
+| `blast <file>` | Remote NCBI BLAST |
+| `stitch <file> [labels...]` | Stitch regions, optionally translate |
+| `check <file>` | Preflight validation |
+| `gibson <file> --enzymes E1,E2 --insert SEQ` | Design Gibson assembly |
+| `varmap <file> <variants_csv>` | Map variant positions |
+| `export <file> <format>` | Convert format (fasta, genbank, tab) |
 
 ## Dependencies
 
@@ -160,14 +136,8 @@ Python 3.8+
 pip install -r requirements.txt  # biopython, pydna
 ```
 
-Branch point prediction tools (BPP, SVM-BPfinder) are automatically downloaded on first use. No manual setup required.
-
-## External Services
-
-- **NCBI Entrez**: Used to fetch mRNA transcripts for exon discovery. Requires internet connection.
-- **NCBI BLAST**: Optional remote BLAST searches via the `blast` command.
-- **IDT API**: Optional complexity screening for synthesis orders. Set `IDT_API_KEY` environment variable to enable.
+Branch point tools (BPP, SVM-BPfinder) are downloaded automatically on first use.
 
 ## License
 
-GPLv3. See LICENSE file.
+GPLv3

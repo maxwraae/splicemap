@@ -100,7 +100,7 @@ ESEFINDER_MATRICES = {
             {'A': 0.62,  'C': -1.58, 'G': -0.11, 'T': 0.27},
         ],
         'threshold': 1.956,
-        'color': '#7C3AED',
+        'color': '#1D4ED8',
     },
     'SRSF2': {
         'alt_name': 'SC35',
@@ -115,7 +115,7 @@ ESEFINDER_MATRICES = {
             {'A': 0.23,  'C': -1.58, 'G': 0.68,  'T': -1.58},
         ],
         'threshold': 2.383,
-        'color': '#A855F7',
+        'color': '#2563EB',
     },
     'SRSF5': {
         'alt_name': 'SRp40',
@@ -129,7 +129,7 @@ ESEFINDER_MATRICES = {
             {'A': -1.58, 'C': -0.05, 'G': 0.80,  'T': -1.58},
         ],
         'threshold': 2.670,
-        'color': '#C084FC',
+        'color': '#3B82F6',
     },
     'SRSF6': {
         'alt_name': 'SRp55',
@@ -142,24 +142,24 @@ ESEFINDER_MATRICES = {
             {'A': 0.61,  'C': 0.98, 'G': -0.79,  'T': -1.58},
         ],
         'threshold': 2.676,
-        'color': '#D8B4FE',
+        'color': '#60A5FA',
     },
 }
 
 # ── Splicemap color palette ────────────────────────────────────────────────
 SPLICEMAP_COLORS = {
-    # Splice signals: blue family
-    '5SS':      '#1E40AF',  # dark blue (donor)
-    '3SS':      '#3B82F6',  # medium blue (acceptor)
+    # Splice sites: teal (distinct from enhancer blue/green)
+    '5SS':      '#0D9488',  # teal (donor)
+    '3SS':      '#14B8A6',  # lighter teal (acceptor)
     # Branch machinery: orange family
     'BPS':      '#C2410C',  # dark orange (branch point)
     'PPT':      '#F59E0B',  # amber (polypyrimidine tract)
-    # ESEfinder: purple family (shades per SR protein)
-    'SRSF1':    '#7C3AED',  # dark purple
-    'SRSF2':    '#A855F7',  # medium purple
-    'SRSF5':    '#C084FC',  # light purple
-    'SRSF6':    '#D8B4FE',  # pale purple
-    # ESRseq: green (enhancer) / red (silencer)
+    # ESEfinder: blue family (enhancers, method 1)
+    'SRSF1':    '#1D4ED8',  # dark blue
+    'SRSF2':    '#2563EB',  # medium blue
+    'SRSF5':    '#3B82F6',  # blue
+    'SRSF6':    '#60A5FA',  # light blue
+    # ESRseq: green (enhancers, method 2) / red (silencers)
     'ESRseq_ESE': '#16A34A',  # green
     'ESRseq_ESS': '#DC2626',  # red
     # hnRNP motifs: red family (silencers)
@@ -240,7 +240,7 @@ def _find_esrseq_sites(exon_seq):
 
 
 ESRSEQ_COLORS = {
-    'ESE': '#16A34A',   # green (enhancer)
+    'ESE': '#22C55E',   # green (enhancer, method 2)
     'ESS': '#DC2626',   # red (silencer)
 }
 
@@ -3905,7 +3905,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
             FeatureLocation(start_0, start_0 + 2, strand=1),
             type="regulatory",
             qualifiers={
-                "label": [f"5SS_MaxEntScan_{label_key}_SM"],
+                "label": [f"5' Splice Site_{label_key}_SM"],
                 "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['5SS']],
                 "ApEinfo_revcolor": [SPLICEMAP_COLORS['5SS']],
                 "note": [note5],
@@ -3939,7 +3939,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
             FeatureLocation(end_0 - 2, end_0, strand=1),
             type="regulatory",
             qualifiers={
-                "label": [f"3SS_MaxEntScan_{label_key}_SM"],
+                "label": [f"3' Splice Site_{label_key}_SM"],
                 "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['3SS']],
                 "ApEinfo_revcolor": [SPLICEMAP_COLORS['3SS']],
                 "note": [note3],
@@ -3949,52 +3949,112 @@ def _splicemap_annotate(record, introns, skip_ese=False):
 
         # ── BPS ───────────────────────────────────────────────────────────
         ppt_scan_start_intron = None  # 0-based index within intron where PPT scan begins
+        intron_report['bps_candidates'] = []
         try:
             _ensure_branchpoint_tools()
             intron_seq = record_seq[start_0:end_0]
+
+            # Run BPP — take top 2
             bpp_preds = _run_bpp(intron_seq, n_results=5)
-            if bpp_preds:
-                top = bpp_preds[0]
-                dist = top['dist_to_3ss']
-                bp_a_pos_1 = intron_len - dist  # 1-based position of BP A in intron
-                motif_start_intron_1 = bp_a_pos_1 - 4  # 1-based start of 7-mer
-                motif_start_intron_0 = motif_start_intron_1 - 1  # 0-based
-                if motif_start_intron_0 < 0:
-                    motif_start_intron_0 = 0
-                motif_end_intron_0 = motif_start_intron_0 + 7  # 0-based exclusive
+            bpp_top2 = bpp_preds[:2]
+
+            # Run SVM-BPfinder — take top 2
+            try:
+                svm_preds = _run_svm_bpfinder(intron_seq)
+                svm_top2 = svm_preds[:2]
+            except Exception:
+                svm_top2 = []
+
+            # Collect all candidates with scores for unified ranking
+            all_bps_candidates = []
+            for pred in bpp_top2:
+                all_bps_candidates.append(('BPP', pred, pred['zsc']))
+            for pred in svm_top2:
+                all_bps_candidates.append(('SVM', pred, pred['svm_scr']))
+            # Sort by score descending (BPP z-score and SVM score are both higher=better)
+            all_bps_candidates.sort(key=lambda x: x[2], reverse=True)
+
+            # Rank-based colors: best candidate brightest, fading out
+            bps_rank_colors = ['#C2410C', '#E8601A', '#F59E0B', '#FCD34D']
+
+            for overall_rank, (tool, pred, _score) in enumerate(all_bps_candidates[:4]):
+                rank_color = bps_rank_colors[overall_rank]
+
+                if tool == 'BPP':
+                    dist = pred['dist_to_3ss']
+                    bp_a_pos_1 = intron_len - dist
+                    motif_start_intron_1 = bp_a_pos_1 - 4
+                    motif_start_intron_0 = max(motif_start_intron_1 - 1, 0)
+                    motif_end_intron_0 = motif_start_intron_0 + 7
+                    motif_len = 7
+
+                    motif_str = pred['motif_7mer']
+                    m = list(motif_str.lower())
+                    if len(m) >= 6:
+                        m[5] = m[5].upper()
+                    motif_display = ''.join(m)
+                    bps_score = pred['zsc']
+                    conf_bps = _confidence_level(bps_score, 2, 0)
+                    note_text = f"BPP. z-score: {bps_score:.2f}. Motif: {motif_display}. -{dist}nt from 3'SS"
+                else:
+                    dist = pred['dist_to_3ss']
+                    bp_a_pos_1 = intron_len - dist
+                    motif_start_intron_1 = bp_a_pos_1 - 4
+                    motif_start_intron_0 = max(motif_start_intron_1 - 1, 0)
+                    motif_end_intron_0 = motif_start_intron_0 + 9
+                    motif_len = 9
+
+                    motif_display = pred['motif_9mer']
+                    bps_score = pred['svm_scr']
+                    conf_bps = None
+                    note_text = f"SVM-BPfinder. score: {bps_score:.3f}. Motif: {motif_display}. -{dist}nt from 3'SS"
 
                 genomic_bps_start = start_0 + motif_start_intron_0
                 genomic_bps_end = start_0 + motif_end_intron_0
 
-                motif_str = top['motif_7mer']
-                m = list(motif_str.lower())
-                if len(m) >= 6:
-                    m[5] = m[5].upper()
-                motif_display = ''.join(m)
+                # Store rank-1 as primary BPS for backward compat + PPT anchor
+                if overall_rank == 0:
+                    intron_report['bps_score'] = bps_score
+                    intron_report['bps_motif'] = motif_display
+                    intron_report['bps_dist'] = dist
+                    intron_report['confidence_bps'] = conf_bps if conf_bps else _confidence_level(bps_score, 0.5, -0.5)
+                    ppt_scan_start_intron = motif_end_intron_0
 
-                bps_score = top['zsc']
-                conf_bps = _confidence_level(bps_score, 2, 0)
-
-                intron_report['bps_score'] = bps_score
-                intron_report['bps_motif'] = motif_display
-                intron_report['bps_dist'] = dist
-                intron_report['confidence_bps'] = conf_bps
+                intron_report['bps_candidates'].append({
+                    'tool': tool,
+                    'rank': overall_rank + 1,
+                    'score': bps_score,
+                    'motif': motif_display,
+                    'dist': dist,
+                    'confidence': conf_bps,
+                    'genomic_start': genomic_bps_start,
+                    'genomic_end': genomic_bps_end,
+                })
 
                 feat_bps = SeqFeature(
                     FeatureLocation(genomic_bps_start, genomic_bps_end, strand=1),
                     type="regulatory",
                     qualifiers={
-                        "label": [f"BPS_BPP_{label_key}_SM"],
-                        "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['BPS']],
-                        "ApEinfo_revcolor": [SPLICEMAP_COLORS['BPS']],
-                        "note": [f"z-score: {bps_score:.2f} ({conf_bps}). Motif: {motif_display}. -{dist}nt from 3'SS"],
+                        "label": [f"Branch Point {overall_rank+1}_{label_key}_SM"],
+                        "ApEinfo_fwdcolor": [rank_color],
+                        "ApEinfo_revcolor": [rank_color],
+                        "note": [note_text],
                     }
                 )
                 new_features.append(feat_bps)
 
-                ppt_scan_start_intron = motif_end_intron_0
-            else:
+            # Fallback: if neither tool returned anything
+            if not bpp_top2 and not svm_top2:
                 report_data['warnings'].append(f"BPS prediction failed for {intron_label}")
+            elif not bpp_top2 and svm_top2:
+                # BPP failed — use SVM rank-1 for PPT window anchor
+                report_data['warnings'].append(f"BPP failed for {intron_label}, using SVM-BPfinder for PPT anchor")
+                pred = svm_top2[0]
+                dist = pred['dist_to_3ss']
+                bp_a_pos_1 = intron_len - dist
+                motif_start_intron_0 = max(bp_a_pos_1 - 5, 0)
+                ppt_scan_start_intron = motif_start_intron_0 + 9
+
         except Exception:
             report_data['warnings'].append(f"BPS prediction failed for {intron_label}")
 
@@ -4002,12 +4062,18 @@ def _splicemap_annotate(record, introns, skip_ese=False):
         if ppt_scan_start_intron is not None:
             ppt_region = record_seq[start_0 + ppt_scan_start_intron:end_0 - 2]
             if ppt_region:
+                import re as _re
                 ppt_len = len(ppt_region)
                 py_count = sum(1 for b in ppt_region if b in ('C', 'T'))
                 pyr_pct = int(round(100 * py_count / ppt_len)) if ppt_len > 0 else 0
 
+                # Longest uninterrupted U-run (T in DNA)
+                u_runs = _re.findall(r'T+', ppt_region)
+                longest_u_run = max(len(r) for r in u_runs) if u_runs else 0
+
                 intron_report['ppt_length'] = ppt_len
                 intron_report['ppt_pyr_pct'] = pyr_pct
+                intron_report['ppt_longest_u_run'] = longest_u_run
                 conf_ppt = _confidence_level(pyr_pct, 80, 60)
                 intron_report['confidence_ppt'] = conf_ppt
 
@@ -4023,10 +4089,10 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                     FeatureLocation(genomic_ppt_start, genomic_ppt_end, strand=1),
                     type="regulatory",
                     qualifiers={
-                        "label": [f"PPT_pyrimidine_{label_key}_SM"],
+                        "label": [f"Polypyrimidine Tract_{label_key}_SM"],
                         "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['PPT']],
                         "ApEinfo_revcolor": [SPLICEMAP_COLORS['PPT']],
-                        "note": [f"{ppt_len} bp, {pyr_pct}% pyrimidine ({conf_ppt})"],
+                        "note": [f"{ppt_len} bp, {pyr_pct}% pyrimidine, longest U-run: {longest_u_run} ({conf_ppt})"],
                     }
                 )
                 new_features.append(feat_ppt)
@@ -4084,17 +4150,17 @@ def _splicemap_annotate(record, introns, skip_ese=False):
 
                 color = ESEFINDER_MATRICES.get(protein, {}).get('color', '#888888')
                 # Annotate top 5 merged regions
-                for region in merged[:5]:
+                for ri, region in enumerate(merged[:5], 1):
                     genomic_start = ex_start_0 + region['start_0']
                     genomic_end = ex_start_0 + region['end_0']
                     feat_ese = SeqFeature(
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"{protein}_ESEfinder_{exon_key}_SM"],
+                            "label": [f"Splice Enhancer {ri}_{exon_key}_SM"],
                             "ApEinfo_fwdcolor": [color],
                             "ApEinfo_revcolor": [color],
-                            "note": [f"ESE: {protein}. score: {region['top_score']:.2f}, {region['hit_count']} hit(s)"],
+                            "note": [f"ESEfinder: {protein}. score: {region['top_score']:.2f}, {region['hit_count']} hit(s)"],
                         }
                     )
                     new_features.append(feat_ese)
@@ -4113,14 +4179,14 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                     continue
                 merged = _merge_splicing_regions(hits, gap=3)
                 color = HNRNP_MOTIFS.get(protein, {}).get('color', SPLICEMAP_COLORS.get(protein, '#888888'))
-                for region in merged[:5]:
+                for ri, region in enumerate(merged[:5], 1):
                     genomic_start = ex_start_0 + region['start_0']
                     genomic_end = ex_start_0 + region['end_0']
                     feat_ess = SeqFeature(
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"{protein}_ESEfinder_{exon_key}_SM"],
+                            "label": [f"Splice Silencer {ri}_{exon_key}_SM"],
                             "ApEinfo_fwdcolor": [color],
                             "ApEinfo_revcolor": [color],
                             "note": [f"ESS: {protein}. {region['hit_count']} hit(s)"],
@@ -4140,14 +4206,14 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                 ese_for_merge = [{'protein': 'ESRseq_ESE', 'start_0': h['start_0'],
                                   'end_0': h['end_0'], 'score': h['score']} for h in esrseq_ese]
                 merged_ese = _merge_splicing_regions(ese_for_merge, gap=3)
-                for region in merged_ese[:5]:
+                for ri, region in enumerate(merged_ese[:5], 1):
                     genomic_start = ex_start_0 + region['start_0']
                     genomic_end = ex_start_0 + region['end_0']
                     new_features.append(SeqFeature(
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"ESE_ESRseq_{exon_key}_SM"],
+                            "label": [f"Splice Enhancer E{ri}_{exon_key}_SM"],
                             "ApEinfo_fwdcolor": [ESRSEQ_COLORS['ESE']],
                             "ApEinfo_revcolor": [ESRSEQ_COLORS['ESE']],
                             "note": [f"ESRseq ESE. score: {region['top_score']:.3f}, {region['hit_count']} hexamer(s). Ke et al. 2011"],
@@ -4159,14 +4225,14 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                 ess_for_merge = [{'protein': 'ESRseq_ESS', 'start_0': h['start_0'],
                                   'end_0': h['end_0'], 'score': h['score']} for h in esrseq_ess]
                 merged_ess = _merge_splicing_regions(ess_for_merge, gap=3)
-                for region in merged_ess[:5]:
+                for ri, region in enumerate(merged_ess[:5], 1):
                     genomic_start = ex_start_0 + region['start_0']
                     genomic_end = ex_start_0 + region['end_0']
                     new_features.append(SeqFeature(
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"ESS_ESRseq_{exon_key}_SM"],
+                            "label": [f"Splice Silencer S{ri}_{exon_key}_SM"],
                             "ApEinfo_fwdcolor": [ESRSEQ_COLORS['ESS']],
                             "ApEinfo_revcolor": [ESRSEQ_COLORS['ESS']],
                             "note": [f"ESRseq ESS. score: {region['top_score']:.3f}, {region['hit_count']} hexamer(s). Ke et al. 2011"],
@@ -4524,8 +4590,8 @@ def _generate_splicemap_report(report_data, output_path):
     # Summary table
     lines.append('## Summary')
     lines.append('')
-    lines.append("| Intron | Length | 5'SS | 3'SS | BPS (z) | PPT | Status |")
-    lines.append('|--------|--------|------|------|---------|-----|--------|')
+    lines.append("| Intron | Length | 5'SS | 3'SS | BPS (z) | PPT | U-run | Status |")
+    lines.append('|--------|--------|------|------|---------|-----|-------|--------|')
     for intron in introns:
         label = intron.get('label', '?')
         ilen = intron.get('length', 0)
@@ -4534,8 +4600,9 @@ def _generate_splicemap_report(report_data, output_path):
         bps = f"{fmt_score(intron.get('bps_score'))} ({short_conf(intron.get('confidence_bps'))})"
         ppt_pct = intron.get('ppt_pyr_pct')
         ppt_str = f"{ppt_pct}% ({short_conf(intron.get('confidence_ppt'))})" if ppt_pct is not None else 'n/a'
+        urun = str(intron.get('ppt_longest_u_run', 'n/a'))
         status = status_for_intron(intron)
-        lines.append(f'| {label} | {ilen} | {s5} | {s3} | {bps} | {ppt_str} | {status} |')
+        lines.append(f'| {label} | {ilen} | {s5} | {s3} | {bps} | {ppt_str} | {urun} | {status} |')
     lines.append('')
     lines.append('---')
     lines.append('')
@@ -4613,29 +4680,55 @@ def _generate_splicemap_report(report_data, output_path):
             s3_seq_disp = s3_seq
         lines.append(f"| 3'SS | {s3_start:,}\u2013{s3_end:,} | {fmt_score(s3_score)} | {s3_conf} | AG, seq: {s3_seq_disp} |")
 
-        # BPS
-        bps_dist = intron.get('bps_dist')
-        bps_score = intron.get('bps_score')
-        bps_motif = intron.get('bps_motif', '')
-        bps_conf = fmt_conf(intron.get('confidence_bps'))
-        if bps_dist is not None:
-            bps_pos_end = intron.get('end_0', 0) - bps_dist
-            bps_pos_start = bps_pos_end - 6
-            bps_detail = f'{bps_motif}, -{bps_dist}nt from 3\'SS'
-            lines.append(f'| BPS | {bps_pos_start:,}\u2013{bps_pos_end:,} | z={fmt_score(bps_score)} | {bps_conf} | {bps_detail} |')
+        # BPS — show all candidates (BPP and SVM separately)
+        bps_candidates = intron.get('bps_candidates', [])
+        # Fallback to legacy fields if bps_candidates is empty (backward compat)
+        if bps_candidates:
+            for cand in bps_candidates:
+                tool = cand.get('tool', '?')
+                rank = cand.get('rank', '?')
+                score = cand.get('score')
+                motif = cand.get('motif', '')
+                dist = cand.get('dist')
+                conf = fmt_conf(cand.get('confidence')) if cand.get('confidence') else '-'
+                g_start = cand.get('genomic_start')
+                g_end = cand.get('genomic_end')
+                pos_str = f'{g_start + 1:,}\u2013{g_end:,}' if g_start is not None else 'n/a'
+                dist_str = f'-{dist}nt from 3\'SS' if dist is not None else ''
+                if tool == 'BPP':
+                    score_str = f'z={fmt_score(score)}'
+                    detail = f'{motif}, {dist_str}'
+                else:
+                    score_str = f'score={score:.3f}' if score is not None else 'n/a'
+                    detail = f'{motif}, {dist_str}'
+                lines.append(f'| BPS ({tool} #{rank}) | {pos_str} | {score_str} | {conf} | {detail} |')
         else:
-            lines.append(f'| BPS | n/a | z={fmt_score(bps_score)} | {bps_conf} | {bps_motif} |')
+            # Legacy single BPS fallback
+            bps_dist = intron.get('bps_dist')
+            bps_score = intron.get('bps_score')
+            bps_motif = intron.get('bps_motif', '')
+            bps_conf = fmt_conf(intron.get('confidence_bps'))
+            if bps_dist is not None:
+                bps_pos_end = intron.get('end_0', 0) - bps_dist
+                bps_pos_start = bps_pos_end - 6
+                bps_detail = f'{bps_motif}, -{bps_dist}nt from 3\'SS'
+                lines.append(f'| BPS | {bps_pos_start:,}\u2013{bps_pos_end:,} | z={fmt_score(bps_score)} | {bps_conf} | {bps_detail} |')
+            else:
+                lines.append(f'| BPS | n/a | z={fmt_score(bps_score)} | {bps_conf} | {bps_motif} |')
 
         # PPT
+        bps_dist = intron.get('bps_dist')
         ppt_len = intron.get('ppt_length')
         ppt_pct = intron.get('ppt_pyr_pct')
         ppt_conf = fmt_conf(intron.get('confidence_ppt'))
+        longest_u_run = intron.get('ppt_longest_u_run')
+        urun_str = f', longest U-run: {longest_u_run}' if longest_u_run is not None else ''
         if bps_dist is not None and ppt_len is not None:
             ppt_end = intron.get('end_0', 0) - bps_dist + 1  # just after BPS region
             ppt_start = ppt_end - ppt_len
-            lines.append(f'| PPT | {ppt_start:,}\u2013{ppt_end:,} | {ppt_pct}% pyr | {ppt_conf} | {ppt_len} bp |')
+            lines.append(f'| PPT | {ppt_start:,}\u2013{ppt_end:,} | {ppt_pct}% pyr | {ppt_conf} | {ppt_len} bp{urun_str} |')
         else:
-            lines.append(f'| PPT | n/a | {ppt_pct}% pyr | {ppt_conf} | {ppt_len} bp |')
+            lines.append(f'| PPT | n/a | {ppt_pct}% pyr | {ppt_conf} | {ppt_len} bp{urun_str} |')
 
         lines.append('')
 
@@ -4708,14 +4801,15 @@ def _print_splicemap_summary(report):
     if report['introns']:
         col_5ss = "5'SS"
         col_3ss = "3'SS"
-        print(f"\n{'Intron':<20} {'Length':>8} {col_5ss:>8} {col_3ss:>8} {'BPS(z)':>8} {'PPT%':>6}")
-        print(f"{'-'*20} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*6}")
+        print(f"\n{'Intron':<20} {'Length':>8} {col_5ss:>8} {col_3ss:>8} {'BPS(z)':>8} {'PPT%':>6} {'U-run':>6}")
+        print(f"{'-'*20} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*6} {'-'*6}")
         for i in report['introns']:
             s5 = f"{i['score_5ss']:.1f}" if i['score_5ss'] is not None else "N/A"
             s3 = f"{i['score_3ss']:.1f}" if i['score_3ss'] is not None else "N/A"
             bps = f"{i.get('bps_score', 0):.1f}" if i.get('bps_score') is not None else "N/A"
             ppt = f"{i.get('ppt_pyr_pct', 0)}%" if i.get('ppt_pyr_pct') is not None else "N/A"
-            print(f"{i['label']:<20} {i['length']:>7,} {s5:>8} {s3:>8} {bps:>8} {ppt:>6}")
+            urun = str(i.get('ppt_longest_u_run', 'N/A'))
+            print(f"{i['label']:<20} {i['length']:>7,} {s5:>8} {s3:>8} {bps:>8} {ppt:>6} {urun:>6}")
 
     # ESE/ESS summary per exon
     if report.get('exons'):
