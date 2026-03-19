@@ -1,0 +1,2 @@
+biopython>=1.84
+pydna>=6.0
