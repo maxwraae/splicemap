@@ -67,63 +67,25 @@ The annotated GenBank file can be opened in SnapGene or UGENE to visualize all a
 
 Splicemap reads exon annotations from the input GenBank file (it does not annotate exons or introns itself). Download your gene as a RefSeqGene from [NCBI Gene](https://www.ncbi.nlm.nih.gov/gene/) to get a file with exon annotations already included.
 
-## How the scoring works
+## Methods and references
 
-Splicemap uses several published methods to identify splicing regulatory elements. Each has different strengths and limitations.
+**Splice sites** scored with [MaxEntScan](https://pubmed.ncbi.nlm.nih.gov/15285897/) (Yeo & Burge 2004). Above 6 is strong, 3-6 moderate, below 3 weak. Non-canonical dinucleotides (not GT...AG) are flagged.
 
-### Splice sites: MaxEntScan
+**Branch points** predicted with [BPP](https://github.com/zhqingit/BPP) (position weight matrix on verified human branch points). z-score above 2 is strong.
 
-Scores the 5' and 3' splice site sequences using maximum entropy models trained on known human splice sites. A score above 6 is strong, 3-6 is moderate, below 3 is weak.
+**ESEfinder** predicts binding sites for 4 SR proteins (SRSF1, SRSF2, SRSF5, SRSF6) using in vitro SELEX-derived matrices ([Cartegni et al. 2003](https://pubmed.ncbi.nlm.nih.gov/12824367/)). Tells you which protein likely binds where. Does not cover other SR proteins (SRSF3, SRSF7, Tra2-beta, RBFOX). ~44% accuracy on known splicing mutations.
 
-Canonical introns start with GT (5' splice site) and end with AG (3' splice site). Non-canonical dinucleotides are flagged as warnings.
+**ESRseq** looks up every hexamer against experimentally measured splicing activity scores ([Ke et al. 2011](https://pubmed.ncbi.nlm.nih.gov/21659425/)). Each hexamer was tested in a minigene assay and scored by RNA-seq. Positive = promotes inclusion, negative = promotes skipping. Captures the net effect of all regulatory proteins, not just four. ~83% accuracy on known splicing mutations. Does not tell you which protein is responsible.
 
-*Reference:* Yeo & Burge, "Maximum entropy modeling of short sequence motifs with applications to RNA splicing signals", Journal of Computational Biology, 2004. [PubMed](https://pubmed.ncbi.nlm.nih.gov/15285897/)
+**hnRNP motifs** detect two silencer proteins by pattern matching: hnRNP A1 (Burd & Dreyfuss 1994) and hnRNP H G-runs (Caputi & Bhatt 2003). For broader silencer coverage, use ESRseq negative scores.
 
-### Branch point: BPP
+### Limitations
 
-Predicts the branch point adenosine using a position weight matrix trained on experimentally verified human branch points. Reports a z-score (above 2 is strong). The branch point is typically 18-40 nucleotides upstream of the 3' splice site.
-
-*Reference:* Zhang, "A branch point prediction tool", [GitHub: zhqingit/BPP](https://github.com/zhqingit/BPP)
-
-### Exonic splicing enhancers: ESEfinder
-
-Slides a position weight matrix across exon sequences to predict binding sites for four specific SR proteins: SRSF1 (SF2/ASF), SRSF2 (SC35), SRSF5 (SRp40), and SRSF6 (SRp55). The matrices were derived from SELEX experiments where each purified protein was tested against random RNA libraries in vitro.
-
-**What it tells you:** Which of these 4 SR proteins likely binds at each position.
-
-**What it misses:** All other SR proteins (SRSF3, SRSF7, Tra2-beta, RBFOX, and others). The in vitro binding preferences may not reflect in vivo activity where RNA structure, competing proteins, and cellular context all play a role. Accuracy on known splicing mutations is approximately 44%.
-
-*Reference:* Cartegni et al., "ESEfinder: a web resource to identify exonic splicing enhancers", Nucleic Acids Research, 2003. [PubMed](https://pubmed.ncbi.nlm.nih.gov/12824367/)
-
-### Exonic regulatory elements: ESRseq
-
-Looks up each 6-mer (hexamer) in the exon against a table of 2,272 hexamers with measured splicing activity scores. Positive scores indicate the hexamer promotes exon inclusion (enhancer). Negative scores indicate it promotes exon skipping (silencer).
-
-The scores were measured experimentally: every possible hexamer was inserted into the same position in a test exon, transfected into cells, and the effect on splicing was quantified by RNA-seq. This captures the net effect of all splicing regulatory proteins, not just the four that ESEfinder covers.
-
-**What it tells you:** Whether a region of the exon actually promotes inclusion or skipping, with a quantitative score.
-
-**What it misses:** Which specific protein is responsible for the effect. The scores come from one specific minigene context (HBB exon 2), so activity may differ in other exon contexts. Does not capture combinatorial effects between adjacent elements.
-
-Accuracy on known splicing mutations is approximately 83%.
-
-*Reference:* Ke et al., "Quantitative evaluation of all hexamers as exonic splicing elements", Genome Research, 2011. [PubMed](https://pubmed.ncbi.nlm.nih.gov/21659425/)
-
-### Exonic splicing silencers: hnRNP motifs
-
-Searches for known binding motifs of two hnRNP proteins using pattern matching: hnRNP A1 (consensus TAGG[GT][TA]) and hnRNP H (G-runs of 4 or more).
-
-**What it misses:** Most silencer proteins. PTBP1 (a major splicing repressor), hnRNP C, hnRNP F, TDP-43, and many others are not covered. For broader silencer detection, the ESRseq negative scores are more comprehensive.
-
-*References:* Burd & Dreyfuss, "RNA binding specificity of hnRNP A1", EMBO Journal, 1994. Caputi & Bhatt, "A G-rich element forms a novel structure at a silencer", Biochemistry, 2003.
-
-### What splicemap does NOT detect
-
-- **RNA secondary structure.** A binding site buried in a hairpin may be inaccessible. Splicemap scans flat sequence only.
-- **Position-dependent effects.** ESEs near splice sites generally matter more than those in the exon center. No positional weighting is applied.
-- **Combinatorial interactions.** Two weak enhancers next to each other may have a stronger effect than either alone. Not modeled.
-- **Cell-type specific regulation.** Splicing factor expression varies between cell types. The same exon may be included in neurons but skipped in liver. Splicemap gives you the sequence-level potential, not the cell-type outcome.
-- **Most splicing silencer proteins.** Only hnRNP A1 and hnRNP H are detected by motif. Use ESRseq negative scores for broader silencer coverage.
+- Scans flat sequence only. RNA secondary structure is not considered.
+- No positional weighting. ESEs near splice sites matter more than those in the exon center.
+- No combinatorial effects between adjacent elements.
+- No cell-type specificity. Splicing regulation varies between tissues.
+- Silencer protein coverage is limited to hnRNP A1 and H by motif. ESRseq provides broader but protein-anonymous coverage.
 
 ## Commands
 
