@@ -3905,7 +3905,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
             FeatureLocation(start_0, start_0 + 2, strand=1),
             type="regulatory",
             qualifiers={
-                "label": [f"5' Splice Site_{label_key}_SM"],
+                "label": [f"5'SS_SM"],
                 "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['5SS']],
                 "ApEinfo_revcolor": [SPLICEMAP_COLORS['5SS']],
                 "note": [note5],
@@ -3939,7 +3939,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
             FeatureLocation(end_0 - 2, end_0, strand=1),
             type="regulatory",
             qualifiers={
-                "label": [f"3' Splice Site_{label_key}_SM"],
+                "label": [f"3'SS_SM"],
                 "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['3SS']],
                 "ApEinfo_revcolor": [SPLICEMAP_COLORS['3SS']],
                 "note": [note3],
@@ -4035,7 +4035,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                     FeatureLocation(genomic_bps_start, genomic_bps_end, strand=1),
                     type="regulatory",
                     qualifiers={
-                        "label": [f"Branch Point {overall_rank+1}_{label_key}_SM"],
+                        "label": [f"BP{overall_rank+1}_SM"],
                         "ApEinfo_fwdcolor": [rank_color],
                         "ApEinfo_revcolor": [rank_color],
                         "note": [note_text],
@@ -4089,7 +4089,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                     FeatureLocation(genomic_ppt_start, genomic_ppt_end, strand=1),
                     type="regulatory",
                     qualifiers={
-                        "label": [f"Polypyrimidine Tract_{label_key}_SM"],
+                        "label": [f"PPT_SM"],
                         "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['PPT']],
                         "ApEinfo_revcolor": [SPLICEMAP_COLORS['PPT']],
                         "note": [f"{ppt_len} bp, {pyr_pct}% pyrimidine, longest U-run: {longest_u_run} ({conf_ppt})"],
@@ -4157,7 +4157,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"Splice Enhancer {ri}_{exon_key}_SM"],
+                            "label": [f"ESE_ESEfinder_SM"],
                             "ApEinfo_fwdcolor": [color],
                             "ApEinfo_revcolor": [color],
                             "note": [f"ESEfinder: {protein}. score: {region['top_score']:.2f}, {region['hit_count']} hit(s)"],
@@ -4186,7 +4186,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"Splice Silencer {ri}_{exon_key}_SM"],
+                            "label": [f"ESS_hnRNP_SM"],
                             "ApEinfo_fwdcolor": [color],
                             "ApEinfo_revcolor": [color],
                             "note": [f"ESS: {protein}. {region['hit_count']} hit(s)"],
@@ -4213,7 +4213,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"Splice Enhancer E{ri}_{exon_key}_SM"],
+                            "label": [f"ESE_ESRseq_SM"],
                             "ApEinfo_fwdcolor": [ESRSEQ_COLORS['ESE']],
                             "ApEinfo_revcolor": [ESRSEQ_COLORS['ESE']],
                             "note": [f"ESRseq ESE. score: {region['top_score']:.3f}, {region['hit_count']} hexamer(s). Ke et al. 2011"],
@@ -4232,7 +4232,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"Splice Silencer S{ri}_{exon_key}_SM"],
+                            "label": [f"ESS_ESRseq_SM"],
                             "ApEinfo_fwdcolor": [ESRSEQ_COLORS['ESS']],
                             "ApEinfo_revcolor": [ESRSEQ_COLORS['ESS']],
                             "note": [f"ESRseq ESS. score: {region['top_score']:.3f}, {region['hit_count']} hexamer(s). Ke et al. 2011"],
