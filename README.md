@@ -25,6 +25,12 @@ Annotations are named by what they are, not which tool found them. Colors group 
 | Splice Enhancer (green) | Green | Hexamer with positive splicing activity (ESRseq) |
 | Splice Silencer (red) | Red (shades) | Hexamer or motif that suppresses exon inclusion |
 
+![Exon 3 junction showing branch points, PPT, splice sites, and ESE/ESS annotations](images/splicemap-exon3-detail.png)
+*MECP2 intron 2 / exon 3 junction. Branch points (orange), PPT (amber), 3'SS (teal), splice enhancers (blue = ESEfinder, green = ESRseq), splice silencers (red).*
+
+![Double-click any annotation for details](images/splicemap-click-detail.png)
+*Double-click any annotation to see the tool, protein, score, and position.*
+
 ## Example Output
 
 ```
