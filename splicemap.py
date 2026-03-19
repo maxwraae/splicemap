@@ -100,7 +100,7 @@ ESEFINDER_MATRICES = {
             {'A': 0.62,  'C': -1.58, 'G': -0.11, 'T': 0.27},
         ],
         'threshold': 1.956,
-        'color': '#8B5CF6',
+        'color': '#7C3AED',
     },
     'SRSF2': {
         'alt_name': 'SC35',
@@ -115,7 +115,7 @@ ESEFINDER_MATRICES = {
             {'A': 0.23,  'C': -1.58, 'G': 0.68,  'T': -1.58},
         ],
         'threshold': 2.383,
-        'color': '#EC4899',
+        'color': '#A855F7',
     },
     'SRSF5': {
         'alt_name': 'SRp40',
@@ -129,7 +129,7 @@ ESEFINDER_MATRICES = {
             {'A': -1.58, 'C': -0.05, 'G': 0.80,  'T': -1.58},
         ],
         'threshold': 2.670,
-        'color': '#F59E0B',
+        'color': '#C084FC',
     },
     'SRSF6': {
         'alt_name': 'SRp55',
@@ -142,18 +142,29 @@ ESEFINDER_MATRICES = {
             {'A': 0.61,  'C': 0.98, 'G': -0.79,  'T': -1.58},
         ],
         'threshold': 2.676,
-        'color': '#10B981',
+        'color': '#D8B4FE',
     },
 }
 
 # ── Splicemap color palette ────────────────────────────────────────────────
 SPLICEMAP_COLORS = {
-    '5SS':     '#4169E1',  # royal blue (U1 snRNP)
-    '3SS':     '#DC143C',  # crimson (splice acceptor)
-    'BPS':     '#FF6600',  # orange (branch point)
-    'PPT':     '#FFD700',  # gold (polypyrimidine tract / U2AF65)
-    'hnRNP_A1': '#EF4444', # red (silencer)
-    'hnRNP_H':  '#B91C1C', # dark red (G-run silencer)
+    # Splice signals: blue family
+    '5SS':      '#1E40AF',  # dark blue (donor)
+    '3SS':      '#3B82F6',  # medium blue (acceptor)
+    # Branch machinery: orange family
+    'BPS':      '#C2410C',  # dark orange (branch point)
+    'PPT':      '#F59E0B',  # amber (polypyrimidine tract)
+    # ESEfinder: purple family (shades per SR protein)
+    'SRSF1':    '#7C3AED',  # dark purple
+    'SRSF2':    '#A855F7',  # medium purple
+    'SRSF5':    '#C084FC',  # light purple
+    'SRSF6':    '#D8B4FE',  # pale purple
+    # ESRseq: green (enhancer) / red (silencer)
+    'ESRseq_ESE': '#16A34A',  # green
+    'ESRseq_ESS': '#DC2626',  # red
+    # hnRNP motifs: red family (silencers)
+    'hnRNP_A1': '#EF4444',  # red
+    'hnRNP_H':  '#B91C1C',  # dark red
 }
 
 # ── hnRNP binding motifs (ESSs) ────────────────────────────────────────────
@@ -229,8 +240,8 @@ def _find_esrseq_sites(exon_seq):
 
 
 ESRSEQ_COLORS = {
-    'ESE': '#22C55E',   # green (enhancer)
-    'ESS': '#F97316',   # orange (silencer)
+    'ESE': '#16A34A',   # green (enhancer)
+    'ESS': '#DC2626',   # red (silencer)
 }
 
 # Lazy-loaded maxentpy for splice site scoring
@@ -3409,9 +3420,9 @@ def _discover_introns(record, transcript_accession=None, email="user@example.com
         [f for f in record.features if f.type == "exon"],
         key=lambda f: int(f.location.start)
     )
-    # Filter out any SM: prefixed exons (those are our own annotations)
+    # Filter out any _SM suffixed exons (those are our own annotations)
     exon_features = [f for f in exon_features
-                     if not any(l.startswith("SM:") for l in f.qualifiers.get("label", []))]
+                     if not any(str(l).endswith("_SM") for l in f.qualifiers.get("label", []))]
     if len(exon_features) >= 2:
         for i in range(len(exon_features) - 1):
             up = exon_features[i]
@@ -3788,12 +3799,12 @@ def _merge_splicing_regions(hits, gap=3):
 
 
 def _clean_splicemap_features(record):
-    """Remove all features created by splicemap (those with SM: prefix in label).
+    """Remove all features created by splicemap (those with _SM suffix in label).
     Returns the cleaned record.
     """
     def _has_sm_label(feat):
         labels = feat.qualifiers.get('label', [])
-        return any(str(lbl).startswith('SM:') for lbl in labels)
+        return any(str(lbl).endswith('_SM') for lbl in labels)
 
     record.features = [f for f in record.features if not _has_sm_label(f)]
     return record
@@ -3894,7 +3905,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
             FeatureLocation(start_0, start_0 + 2, strand=1),
             type="regulatory",
             qualifiers={
-                "label": [f"SM:5SS_{label_key}"],
+                "label": [f"5SS_MaxEntScan_{label_key}_SM"],
                 "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['5SS']],
                 "ApEinfo_revcolor": [SPLICEMAP_COLORS['5SS']],
                 "note": [note5],
@@ -3928,7 +3939,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
             FeatureLocation(end_0 - 2, end_0, strand=1),
             type="regulatory",
             qualifiers={
-                "label": [f"SM:3SS_{label_key}"],
+                "label": [f"3SS_MaxEntScan_{label_key}_SM"],
                 "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['3SS']],
                 "ApEinfo_revcolor": [SPLICEMAP_COLORS['3SS']],
                 "note": [note3],
@@ -3973,7 +3984,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                     FeatureLocation(genomic_bps_start, genomic_bps_end, strand=1),
                     type="regulatory",
                     qualifiers={
-                        "label": [f"SM:BPS_{label_key}"],
+                        "label": [f"BPS_BPP_{label_key}_SM"],
                         "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['BPS']],
                         "ApEinfo_revcolor": [SPLICEMAP_COLORS['BPS']],
                         "note": [f"z-score: {bps_score:.2f} ({conf_bps}). Motif: {motif_display}. -{dist}nt from 3'SS"],
@@ -4012,7 +4023,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                     FeatureLocation(genomic_ppt_start, genomic_ppt_end, strand=1),
                     type="regulatory",
                     qualifiers={
-                        "label": [f"SM:PPT_{label_key}"],
+                        "label": [f"PPT_pyrimidine_{label_key}_SM"],
                         "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['PPT']],
                         "ApEinfo_revcolor": [SPLICEMAP_COLORS['PPT']],
                         "note": [f"{ppt_len} bp, {pyr_pct}% pyrimidine ({conf_ppt})"],
@@ -4080,7 +4091,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"SM:{protein}_{exon_key}"],
+                            "label": [f"{protein}_ESEfinder_{exon_key}_SM"],
                             "ApEinfo_fwdcolor": [color],
                             "ApEinfo_revcolor": [color],
                             "note": [f"ESE: {protein}. score: {region['top_score']:.2f}, {region['hit_count']} hit(s)"],
@@ -4109,7 +4120,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"SM:{protein}_{exon_key}"],
+                            "label": [f"{protein}_ESEfinder_{exon_key}_SM"],
                             "ApEinfo_fwdcolor": [color],
                             "ApEinfo_revcolor": [color],
                             "note": [f"ESS: {protein}. {region['hit_count']} hit(s)"],
@@ -4136,7 +4147,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"SM:ESRseq_ESE_{exon_key}"],
+                            "label": [f"ESE_ESRseq_{exon_key}_SM"],
                             "ApEinfo_fwdcolor": [ESRSEQ_COLORS['ESE']],
                             "ApEinfo_revcolor": [ESRSEQ_COLORS['ESE']],
                             "note": [f"ESRseq ESE. score: {region['top_score']:.3f}, {region['hit_count']} hexamer(s). Ke et al. 2011"],
@@ -4155,7 +4166,7 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                         FeatureLocation(genomic_start, genomic_end, strand=1),
                         type="misc_feature",
                         qualifiers={
-                            "label": [f"SM:ESRseq_ESS_{exon_key}"],
+                            "label": [f"ESS_ESRseq_{exon_key}_SM"],
                             "ApEinfo_fwdcolor": [ESRSEQ_COLORS['ESS']],
                             "ApEinfo_revcolor": [ESRSEQ_COLORS['ESS']],
                             "note": [f"ESRseq ESS. score: {region['top_score']:.3f}, {region['hit_count']} hexamer(s). Ke et al. 2011"],
@@ -4725,7 +4736,7 @@ def _print_splicemap_summary(report):
 
     # Feature count
     sm_count = len(report.get('introns', [])) * 4  # rough estimate
-    print(f"\nAnnotations added (SM: prefix). Re-run to update, --clean to remove.")
+    print(f"\nAnnotations added (_SM suffix). Re-run to update, --clean to remove.")
 
 
 def cmd_splicemap(args):
