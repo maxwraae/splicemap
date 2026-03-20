@@ -8,7 +8,8 @@ Simple pipeline for annotating splicing regulatory elements on genomic DNA seque
 git clone https://github.com/maxwraae/splicemap.git
 cd splicemap
 pip install -r requirements.txt
-python splicemap.py splicemap examples/MECP2_CS.gb -t NM_004992.4
+# Download MECP2 RefSeqGene from NCBI (NG_007107), then:
+python splicemap.py splicemap NG_007107.gb -t NM_004992.4
 ```
 
 ## Input
@@ -28,6 +29,7 @@ Annotations are named by what they are, not which tool found them. Colors group 
 | Splice Enhancer (blue) | Blue (shades) | SR protein binding site (ESEfinder) |
 | Splice Enhancer (green) | Green | Hexamer with positive splicing activity (ESRseq) |
 | Splice Silencer (red) | Red (shades) | Hexamer or motif that suppresses exon inclusion |
+| U2AF65 binding site | Darker amber | Predicted 9-nt U2AF65 binding register within PPT |
 
 ![Exon 3 junction showing branch points, PPT, splice sites, and ESE/ESS annotations](images/splicemap-exon3-detail.png)
 *MECP2 intron 2 / exon 3 junction. Branch points (orange), PPT (amber), 3'SS (teal), splice enhancers (blue = ESEfinder, green = ESRseq), splice silencers (red).*
@@ -72,6 +74,8 @@ Branch point prediction is roughly 75-80% accurate. No tool reliably identifies 
 Defined as the region between the top branch point candidate and the 3'SS AG. Reports length, pyrimidine percentage, and longest uninterrupted U-run. The U-run is the most informative single feature for U2AF65 binding (crystal structures show its two RRM domains each grab 4-5 uridines).
 
 No validated computational model for U2AF65 binding affinity exists. PPT is scored by composition, which is standard practice. The PPT window depends on the branch point prediction.
+
+**U2AF65 binding site prediction.** Within the PPT, splicemap predicts the optimal 9-nucleotide register where U2AF65's tandem RRM domains bind. Scoring uses nucleotide-level log-odds derived from U2AF65 SELEX composition (Banerjee et al. 2003): uridine is strongly preferred (log-odds +0.94), cytosine slightly preferred (+0.11), purines penalized (-1.83). RRM2 positions (5' end of footprint) are weighted 1.5x because RRM2 makes more sequence-specific contacts (Sickmier et al. 2006). This is an approximation; the full S65 pentamer table (Erkelenz et al. 2008) would provide dinucleotide context effects.
 
 ### Exonic splicing enhancers and silencers
 

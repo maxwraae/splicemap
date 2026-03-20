@@ -154,6 +154,7 @@ SPLICEMAP_COLORS = {
     # Branch machinery: orange family
     'BPS':      '#C2410C',  # dark orange (branch point)
     'PPT':      '#F59E0B',  # amber (polypyrimidine tract)
+    'U2AF65':   '#D97706',  # darker amber (U2AF65 predicted binding site)
     # ESEfinder: blue family (enhancers, method 1)
     'SRSF1':    '#1D4ED8',  # dark blue
     'SRSF2':    '#2563EB',  # medium blue
@@ -183,6 +184,19 @@ HNRNP_MOTIFS = {
         'description': 'hnRNP H binding site (G-run ESS)',
     },
 }
+
+# ── U2AF65 binding prediction (S65-approximate) ─────────────────────────────
+# Nucleotide log-odds from SELEX composition for U2AF65 binding preference.
+# Score = ln(f_SELEX / 0.25) where f_SELEX from Banerjee et al. 2003.
+# U2AF65 strongly prefers uridine, tolerates cytosine, penalizes purines.
+U2AF65_NT_LOGODDS = {
+    'T': 0.94,   # ln(0.64/0.25) — strong preference (uridine in RNA)
+    'C': 0.11,   # ln(0.28/0.25) — slight preference
+    'A': -1.83,  # ln(0.04/0.25) — strong penalty
+    'G': -1.83,  # ln(0.04/0.25) — strong penalty
+}
+U2AF65_FOOTPRINT = 9   # nucleotides in binding footprint (Sickmier 2006, Agrawal 2016)
+U2AF65_PENTAMER = 5     # sliding window size for scoring
 
 # ── ESRseq hexamer lookup (Ke et al., Genome Research 2011) ───────────────────
 # Measured splicing activity of all hexamers in a minigene assay.
@@ -3672,6 +3686,86 @@ def _score_splice_site_3(record_seq, intron_end_0):
         return (None, None)
 
 
+def _predict_u2af65_binding(ppt_seq):
+    """Predict where U2AF65 binds within a polypyrimidine tract.
+
+    Uses S65-approximate scoring: pentamer sliding window of nucleotide log-odds
+    derived from U2AF65 SELEX composition (Banerjee et al. 2003). Identifies the
+    optimal 9-nt binding register based on the U2AF65 RRM1+RRM2 crystal structure
+    footprint (Sickmier 2006, Agrawal 2016).
+
+    RRM2 (positions 0-3 of footprint) is weighted 1.5x because it makes more
+    sequence-specific contacts than RRM1 (Sickmier 2006).
+
+    Args:
+        ppt_seq: DNA sequence of the PPT region (uppercase string, T not U)
+
+    Returns:
+        dict with keys:
+            site_start_0: int, 0-based position of best 9-mer in ppt_seq
+            site_seq: str, the predicted 9-nt binding sequence
+            site_score: float, weighted score of best window
+            pentamer_scores: list of float, per-position pentamer scores
+            overall_s65: float, mean of all pentamer scores (PPT quality)
+            quality: str, 'strong'/'moderate'/'weak'
+        Returns None if PPT is too short for analysis.
+    """
+    import math
+    seq = str(ppt_seq).upper()
+    n = len(seq)
+
+    if n < U2AF65_FOOTPRINT:
+        return None
+
+    # Step 1: Compute pentamer scores at each position
+    pentamer_scores = []
+    for i in range(n - U2AF65_PENTAMER + 1):
+        kmer = seq[i:i + U2AF65_PENTAMER]
+        score = sum(U2AF65_NT_LOGODDS.get(b, -1.83) for b in kmer) / U2AF65_PENTAMER
+        pentamer_scores.append(score)
+
+    # Overall S65-approximate score (mean of all pentamers)
+    overall_s65 = sum(pentamer_scores) / len(pentamer_scores) if pentamer_scores else 0
+
+    # Quality classification (calibrated to nucleotide-level log-odds scale)
+    # Pure poly-U scores ~0.94, strong natural PPTs ~0.6-0.8, weak PPTs <0.2
+    if overall_s65 > 0.6:
+        quality = 'strong'
+    elif overall_s65 > 0.2:
+        quality = 'moderate'
+    else:
+        quality = 'weak'
+
+    # Step 2: Score each possible 9-mer binding window
+    # RRM2 contacts positions 0-3 (5' end), RRM1 contacts 4-8 (3' end)
+    # RRM2 is pickier (more H-bonds to uracil): weight 1.5x
+    best_score = float('-inf')
+    best_start = 0
+
+    for i in range(n - U2AF65_FOOTPRINT + 1):
+        window = seq[i:i + U2AF65_FOOTPRINT]
+        score = 0.0
+        for j, base in enumerate(window):
+            nt_score = U2AF65_NT_LOGODDS.get(base, -1.83)
+            # RRM2 positions (0-3) get 1.5x weight
+            weight = 1.5 if j < 4 else 1.0
+            score += nt_score * weight
+        if score > best_score:
+            best_score = score
+            best_start = i
+
+    site_seq = seq[best_start:best_start + U2AF65_FOOTPRINT]
+
+    return {
+        'site_start_0': best_start,
+        'site_seq': site_seq,
+        'site_score': round(best_score, 2),
+        'pentamer_scores': [round(s, 3) for s in pentamer_scores],
+        'overall_s65': round(overall_s65, 3),
+        'quality': quality,
+    }
+
+
 def _find_ese_sites(exon_seq):
     """Scan exon sequence for SR protein binding sites (ESEs) using ESEfinder matrices.
 
@@ -4074,8 +4168,19 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                 intron_report['ppt_length'] = ppt_len
                 intron_report['ppt_pyr_pct'] = pyr_pct
                 intron_report['ppt_longest_u_run'] = longest_u_run
+                intron_report['ppt_seq'] = ppt_region
                 conf_ppt = _confidence_level(pyr_pct, 80, 60)
                 intron_report['confidence_ppt'] = conf_ppt
+
+                # U2AF65 binding site prediction
+                u2af_result = _predict_u2af65_binding(ppt_region)
+                if u2af_result:
+                    intron_report['u2af65_site_start_0'] = u2af_result['site_start_0']
+                    intron_report['u2af65_site_seq'] = u2af_result['site_seq']
+                    intron_report['u2af65_site_score'] = u2af_result['site_score']
+                    intron_report['u2af65_pentamer_scores'] = u2af_result['pentamer_scores']
+                    intron_report['u2af65_overall_s65'] = u2af_result['overall_s65']
+                    intron_report['u2af65_quality'] = u2af_result['quality']
 
                 if pyr_pct < 60:
                     report_data['warnings'].append(
@@ -4096,6 +4201,28 @@ def _splicemap_annotate(record, introns, skip_ese=False):
                     }
                 )
                 new_features.append(feat_ppt)
+
+                # U2AF65 predicted binding site annotation
+                if u2af_result:
+                    u2af_site_genomic_start = genomic_ppt_start + u2af_result['site_start_0']
+                    u2af_site_genomic_end = u2af_site_genomic_start + U2AF65_FOOTPRINT
+                    feat_u2af = SeqFeature(
+                        FeatureLocation(u2af_site_genomic_start, u2af_site_genomic_end, strand=1),
+                        type="protein_bind",
+                        qualifiers={
+                            "label": ["U2AF65_SM"],
+                            "ApEinfo_fwdcolor": [SPLICEMAP_COLORS['U2AF65']],
+                            "ApEinfo_revcolor": [SPLICEMAP_COLORS['U2AF65']],
+                            "note": [
+                                f"Predicted U2AF65 binding site ({u2af_result['quality']}). "
+                                f"Seq: {u2af_result['site_seq']}, score: {u2af_result['site_score']}, "
+                                f"S65\u2248{u2af_result['overall_s65']:.2f}. "
+                                f"Method: nucleotide log-odds from U2AF65 SELEX (Banerjee 2003), "
+                                f"9-nt footprint (Sickmier 2006), RRM2-weighted."
+                            ],
+                        }
+                    )
+                    new_features.append(feat_u2af)
 
         report_data['introns'].append(intron_report)
 
@@ -4730,7 +4857,75 @@ def _generate_splicemap_report(report_data, output_path):
         else:
             lines.append(f'| PPT | n/a | {ppt_pct}% pyr | {ppt_conf} | {ppt_len} bp{urun_str} |')
 
+        # U2AF65 binding site
+        u2af_seq = intron.get('u2af65_site_seq')
+        u2af_score = intron.get('u2af65_site_score')
+        u2af_quality = intron.get('u2af65_quality')
+        u2af_s65 = intron.get('u2af65_overall_s65')
+        u2af_start_0 = intron.get('u2af65_site_start_0')
+        if u2af_seq is not None:
+            # Compute genomic position of U2AF65 site
+            if intron.get('bps_dist') is not None:
+                ppt_len_u = intron.get('ppt_length', 0)
+                ppt_end_u = intron.get('end_0', 0) - intron.get('bps_dist', 0) + 1
+                ppt_start_u = ppt_end_u - ppt_len_u
+                u2af_genomic_start = ppt_start_u + u2af_start_0
+                u2af_genomic_end = u2af_genomic_start + 9
+                pos_str = f'{u2af_genomic_start + 1:,}\u2013{u2af_genomic_end:,}'
+            else:
+                pos_str = 'n/a'
+            score_str = f'{u2af_score:.1f}' if u2af_score is not None else 'n/a'
+            quality_str = u2af_quality or 'n/a'
+            detail = f'{u2af_seq}, S65\u2248{u2af_s65:.2f} (nucleotide log-odds approx.)'
+            lines.append(f'| U2AF65 site | {pos_str} | {score_str} | {quality_str} | {detail} |')
+
         lines.append('')
+
+        # U2AF65 binding heatmap
+        u2af_pentamer_scores = intron.get('u2af65_pentamer_scores')
+        if u2af_pentamer_scores and intron.get('ppt_length'):
+            if intron.get('bps_dist') is not None:
+                ppt_len_h = intron.get('ppt_length', 0)
+                ppt_end_h = intron.get('end_0', 0) - intron.get('bps_dist', 0) + 1
+                ppt_start_h = ppt_end_h - ppt_len_h
+            else:
+                ppt_start_h = None
+
+            if ppt_start_h is not None:
+                lines.append('### U2AF65 Binding Profile')
+                lines.append('')
+                lines.append('```')
+
+                # Build per-position heat characters from pentamer scores
+                heat_chars = []
+                for s in u2af_pentamer_scores:
+                    if s > 0.7:
+                        heat_chars.append('\u2588')    # █ full block
+                    elif s > 0.3:
+                        heat_chars.append('\u2593')    # ▓ dark shade
+                    elif s > 0.0:
+                        heat_chars.append('\u2592')    # ▒ medium shade
+                    elif s > -0.5:
+                        heat_chars.append('\u2591')    # ░ light shade
+                    else:
+                        heat_chars.append('\u00b7')    # · middle dot
+
+                # Show PPT sequence if available
+                ppt_seq = intron.get('ppt_seq', '')
+                if ppt_seq:
+                    seq_line = 'PPT:  ' + ' '.join(ppt_seq)
+                    lines.append(seq_line)
+
+                lines.append(f'U2AF: {" ".join(heat_chars)}')
+                u2af_start = intron.get('u2af65_site_start_0', 0)
+                site_seq = intron.get('u2af65_site_seq', '?')
+                site_quality = intron.get('u2af65_quality', '?')
+                lines.append(f'      {"  " * max(0, u2af_start)}{"─" * min(17, 2 * 9 - 1)}')
+                lines.append(f'      {"  " * max(0, u2af_start)}predicted U2AF65 site: {site_seq} ({site_quality})')
+                lines.append('```')
+                lines.append('')
+                lines.append(f'*Heat: \u2588 (>0.7) \u2593 (0.3\u20130.7) \u2592 (0\u20130.3) \u2591 (-0.5\u20130) \u00b7 (<-0.5). S65\u2248 scoring: nucleotide log-odds from U2AF65 SELEX (Banerjee 2003).*')
+                lines.append('')
 
         # ESE/ESS table for flanking exon
         target_exon = up_exon if up_exon else dn_exon
